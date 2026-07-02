@@ -15,17 +15,20 @@ def main():
                         help='Directory to save output files (default: current directory)')
     args = parser.parse_args()
 
-    # Open input file
-    df_input = pd.read_csv(args.input, sep=args.input_separator, dtype=str)
-
-    # Check if input table is empty
-    fileContent = "empty"
-    if df_input.empty:
-        print("Input table is empty.")
+    # Determine emptiness cheaply: read only the first data row (nrows=1) so a large input is never
+    # loaded in full. df.empty is True iff there were zero data rows. A 0-byte / header-less file
+    # raises EmptyDataError, which we also treat as empty.
+    try:
+        df_input = pd.read_csv(args.input, sep=args.input_separator, dtype=str, nrows=1)
+        if df_input.empty:
+            print("Input table is empty.")
+            fileContent = "empty"
+        else:
+            print("Input table is not empty.")
+            fileContent = "notEmpty"
+    except pd.errors.EmptyDataError:
+        print("Input table is empty (no data or header).")
         fileContent = "empty"
-    else:
-        print("Input table is not empty.")
-        fileContent = "notEmpty"
 
     with open(os.path.join(args.output_dir, 'isFileEmpty.txt'), 'w') as f:
         f.write(fileContent)

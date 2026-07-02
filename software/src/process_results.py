@@ -53,7 +53,11 @@ sequencesTsv = "sequences.tsv"
 
 # sampleId, clonotypeKey, clonotypeKeyLabel,sequence_..., 
 # ...VGene, JGene
-cloneTable = pl.read_csv(cloneTableTsv, separator="\t")
+cloneTable = pl.read_csv(cloneTableTsv, separator="\t", infer_schema_length=0)
+# Keys are read as strings (infer_schema_length=0, matching prep.py) so downstream joins never hit
+# Int/Utf8 dtype mismatches; abundance is the only numeric column, cast back explicitly.
+if "abundance" in cloneTable.columns:
+    cloneTable = cloneTable.with_columns(pl.col("abundance").cast(pl.Float64, strict=False))
 
 # Get all sequence columns if we have them
 sequence_cols = [col for col in cloneTable.columns 
@@ -82,15 +86,15 @@ cloneTable = cloneTable.with_columns(
 # step below maps each representative back to every clonotype sharing its sequence. clusterId is the
 # provisional integer here — it is relabelled to the cluster's medoid clonotypeKey after the kalign
 # pass (see "Medoid relabel" below).
-clusters = pl.read_csv(clustersCsv, separator=",").rename(
+clusters = pl.read_csv(clustersCsv, separator=",", infer_schema_length=0).rename(
     {"seq_id": "clonotypeKey", "cluster": "clusterId"}
-).with_columns(pl.col("clusterId").cast(pl.Utf8))
+)
 
 # --- Expand de-duplicated clusters back to all original clonotypeKeys ---
 # The prep step deduped to UNIQUE sequences (one representative per group of identical clustering
 # keys) and emitted dedup_mapping.tsv (representativeKey -> clonotypeKey); GLIPH2 + Leiden then
 # clustered the unique set. Expand each representative back to every clonotypeKey sharing its sequence.
-dedup_mapping = pl.read_csv(dedupMappingTsv, separator="\t")
+dedup_mapping = pl.read_csv(dedupMappingTsv, separator="\t", infer_schema_length=0)
 # dedup_mapping has columns: representativeKey, clonotypeKey
 
 num_representatives = clusters.select(pl.col("clonotypeKey").n_unique()).item()
