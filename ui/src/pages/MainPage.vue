@@ -38,6 +38,8 @@ const clusteringLogTabOptions = [
   { label: "GLIPH2", value: "gliph" as const },
   { label: "Leiden", value: "leiden" as const },
 ];
+// α-warning visibility — PlAlert's close button is controlled, so it needs a v-model ref to hide.
+const alphaWarningOpen = ref(true);
 const settingsOpen = ref(
   app.model.data.datasetRef === undefined || app.model.data.inputSelection === undefined,
 );
@@ -76,6 +78,29 @@ const clusterBy = computed(() =>
 function onClusterByChange(value?: string) {
   app.model.data.inputSelection = value ? JSON.parse(value) : undefined;
 }
+
+// Chain of the current selection ("alpha"/"beta"), for the α-clustering warning. Computed
+// CLIENT-SIDE from already-loaded option labels so the warning appears instantly — a model output
+// would wait a backend round-trip (noticeably slow on a remote server). Single-cell: the "Cluster
+// by" option label names the chain ("Alpha CDR3 aa"). Bulk: that label is generic ("CDR3 aa"), so
+// the chain comes from the chain-specific dataset label ("TCR Alpha" vs single-cell "TCR Alpha/Beta").
+const selectedChain = computed<"alpha" | "beta" | undefined>(() => {
+  if (!app.model.data.inputSelection) return undefined;
+  const cbLabel =
+    app.model.outputs.clusterByOptions?.find((o) => o.value === clusterBy.value)?.label ?? "";
+  if (/^\s*alpha\b/i.test(cbLabel)) return "alpha";
+  if (/^\s*beta\b/i.test(cbLabel)) return "beta";
+  const dsRef = app.model.data.datasetRef;
+  const dsLabel = dsRef
+    ? (app.model.outputs.datasetOptions?.find(
+        (o) => o.ref.blockId === dsRef.blockId && o.ref.name === dsRef.name,
+      )?.label ?? "")
+    : "";
+  if (dsLabel.includes("/")) return undefined; // e.g. single-cell "TCR Alpha/Beta" (chain set above)
+  if (/\balpha\b/i.test(dsLabel)) return "alpha";
+  if (/\bbeta\b/i.test(dsLabel)) return "beta";
+  return undefined;
+});
 
 // Self-heal a stale selection: if the options reload and the stored selection is no longer offered
 // (dataset/upstream changed), clear it. Watch the OUTPUT (not data) — the SDK swaps the whole data
@@ -187,6 +212,19 @@ const clusterAxis = computed<AxisId>(() => ({
           <b>+ V gene</b> additionally requires the same V gene within a cluster.
         </template>
       </PlDropdown>
+
+      <PlAlert
+        v-if="selectedChain === 'alpha'"
+        v-model="alphaWarningOpen"
+        type="warn"
+        style="margin-top: 0.5rem"
+        closeable
+      >
+        <b>TCR α is less reliable for specificity clustering.</b> GLIPH2 is built for the β chain —
+        its motif reference is β-derived (so α motif grouping isn't calibrated), and α carries a
+        weaker antigen-specificity signal. Prefer β where possible and interpret α clusters with
+        caution.
+      </PlAlert>
 
       <PlSectionSeparator>Centroid</PlSectionSeparator>
       <PlBtnGroup
