@@ -656,6 +656,16 @@ wf.body(func(args) {
 
 		gliphLog: gliphLog,
 		leidenLog: leidenLog,
+		abundances: clusteringAnalysis.output("abundances"),
+		clusterToSeq: clusteringAnalysis.output("clusterToSeq"),
+		cloneToCluster: clusteringAnalysis.output("cloneToCluster"),
+		abundancesPerCluster: clusteringAnalysis.output("abundancesPerCluster"),
+		distanceToCentroid: clusteringAnalysis.output("distanceToCentroid"),
+		clusterRadius: clusteringAnalysis.output("clusterRadius"),
+		clusterToSeqTop: clusteringAnalysis.output("clusterToSeqTop"),
+		clusterRadiusTop: clusteringAnalysis.output("clusterRadiusTop"),
+		abundancesTop: clusteringAnalysis.output("abundancesTop"),
+		sequences: clusteringAnalysis.output("sequences"),
 		isEmpty: isEmpty
 	}
 	exports := {
