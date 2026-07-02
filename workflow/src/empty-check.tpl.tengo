@@ -1,0 +1,32 @@
+self := import("@platforma-sdk/workflow-tengo:tpl")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+assets:= import("@platforma-sdk/workflow-tengo:assets")
+
+emptyCheckSw := assets.importSoftware("@platforma-open/milaboratories.tcr-clustering.software:empty-check")
+
+
+self.validateInputs({
+	"__options__,closed": "",
+    seqTable: "any"
+})
+
+self.defineOutputs("emptyResult")
+
+self.body(func(inputs) {
+    // Run script to check if input table is emptyAdd commentMore actions
+	emptyCheck := exec.builder().
+			software(emptyCheckSw).
+			mem("16GiB").
+			cpu(1).
+			addFile("sequences.tsv", inputs.seqTable).
+			arg("--output-dir").arg(".").
+			arg("--input").arg("sequences.tsv").
+			arg("--input-separator").arg("\t").
+			saveFileContent("isFileEmpty.txt").
+			printErrStreamToStdout().
+			run()
+
+    return {
+        emptyResult: emptyCheck.getFileContent("isFileEmpty.txt")
+    }
+})
