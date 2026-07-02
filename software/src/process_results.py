@@ -30,9 +30,6 @@ parser.add_argument('--consensus-threshold', type=float, default=0.6,
                          'the winning residue must hold for the theoretical (consensus) centroid '
                          'to commit that residue; below it the position is ambiguous and emits "X". '
                          'Default 0.6.')
-parser.add_argument('--emit-plurality-centroid', action='store_true',
-                    help='Also emit plurality-centroid.tsv: per-cluster abundance-weighted per-column '
-                         'majority residue (consensus at threshold 0.0, so no "X").')
 parser.add_argument('--no-abundance-weighting', action='store_true',
                     help='Ignore clonotype abundance when building the centroid (and the profile '
                          'distance/medoid measured against it): every clonotype counts equally '
@@ -42,7 +39,6 @@ parser.add_argument('--no-abundance-weighting', action='store_true',
 args = parser.parse_args()
 
 consensus_threshold = args.consensus_threshold
-emit_plurality = args.emit_plurality_centroid
 no_abundance_weighting = args.no_abundance_weighting
 
 clustersCsv = "clusters.csv"

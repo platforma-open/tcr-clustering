@@ -15,7 +15,6 @@ self.validateInputs({
 	emptyOrNot: "any",
 	seqTable: "any",
 	cloneTable: "any",
-	isSingleCell: "boolean",
 	numSequences: "number",
 	resolution: "number",
 	"consensusThreshold,?": "number",
@@ -35,7 +34,6 @@ self.body(func(inputs) {
 	resolution := inputs.resolution
 	consensusThreshold := is_undefined(inputs.consensusThreshold) ? 0.6 : inputs.consensusThreshold
 	weightByAbundance := is_undefined(inputs.weightByAbundance) ? false : inputs.weightByAbundance
-	isSingleCell := inputs.isSingleCell
 
 	baseMemGiB := 32
 	if !is_undefined(inputs.mem) {
@@ -53,9 +51,6 @@ self.body(func(inputs) {
 			mem("1GiB").
 			cpu(1).
 			arg("--num-sequences").arg(string(numSequences))
-		if isSingleCell {
-			emptyFilesBuilder = emptyFilesBuilder.arg("--is-single-cell")
-		}
 		emptyFiles := emptyFilesBuilder.
 			saveFile("abundances.tsv").
 			saveFile("cluster-to-seq.tsv").

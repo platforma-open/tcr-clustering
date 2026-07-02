@@ -8,11 +8,6 @@ def main():
     )
     parser.add_argument('--num-sequences', type=int, default=0,
                         help='Number of sequence columns (default: 0)')
-    parser.add_argument('--is-single-cell', action='store_true',
-                        help='Whether this is single-cell data')
-    parser.add_argument('--emit-plurality-centroid', action='store_true',
-                        help='Also emit a header-only plurality-centroid.tsv matching the real-run header '
-                             '(per-cluster abundance-weighted per-column majority residue, no "X").')
     args = parser.parse_args()
 
     num_sequences = args.num_sequences

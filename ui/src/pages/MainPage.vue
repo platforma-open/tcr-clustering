@@ -209,7 +209,7 @@ const clusterAxis = computed<AxisId>(() => ({
         <template #tooltip>
           What to cluster on.<br />
           <b>CDR3</b> clusters on the CDR3 amino-acid sequence (GLIPH2 similarity network).<br />
-          <b>+ V gene</b> additionally requires the same V gene within a cluster.
+          <b>+ V gene</b> additionally requires a shared V gene to link CDR3s by similarity.
         </template>
       </PlDropdown>
 
