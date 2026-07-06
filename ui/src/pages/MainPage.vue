@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { PlMultiSequenceAlignment } from "@milaboratories/multi-sequence-alignment";
 import strings from "@milaboratories/strings";
+import { VGENE_FASTPATH_THRESHOLD } from "@platforma-open/milaboratories.tcr-clustering.model";
 import type {
   AxisId,
   PColumnPredicate,
@@ -40,6 +41,8 @@ const clusteringLogTabOptions = [
 ];
 // α-warning visibility — PlAlert's close button is controlled, so it needs a v-model ref to hide.
 const alphaWarningOpen = ref(true);
+// Large-input warning visibility — same controlled-close pattern as the α-warning.
+const largeInputWarningOpen = ref(true);
 const settingsOpen = ref(
   app.model.data.datasetRef === undefined || app.model.data.inputSelection === undefined,
 );
@@ -101,6 +104,23 @@ const selectedChain = computed<"alpha" | "beta" | undefined>(() => {
   if (/\bbeta\b/i.test(dsLabel)) return "beta";
   return undefined;
 });
+
+// Warn when a CDR3-only selection (no "+ V gene") is large enough that GLIPH2's global step is
+// intractable. The count comes from the staging prerun (outputs.inputSeqCount), so it appears before
+// Run. Only CDR3-only selections are flagged — the "+ V gene" options engage the fast path.
+const largeCdr3OnlyInput = computed(() => {
+  const sel = app.model.data.inputSelection;
+  if (!sel || sel.vGeneRef !== undefined) return false;
+  return (app.model.outputs.inputSeqCount ?? 0) > VGENE_FASTPATH_THRESHOLD;
+});
+
+// Staging size check in flight: inputs are picked but the prerun count hasn't landed yet. Run is
+// blocked meanwhile (model `.args()` throws), so surface a visible message explaining the wait —
+// the args-error itself isn't shown in this block's layout.
+const checkingSize = computed(
+  () =>
+    app.model.data.inputSelection !== undefined && app.model.outputs.inputSeqCount === undefined,
+);
 
 // Self-heal a stale selection: if the options reload and the stored selection is no longer offered
 // (dataset/upstream changed), clear it. Watch the OUTPUT (not data) — the SDK swaps the whole data
@@ -213,6 +233,10 @@ const clusterAxis = computed<AxisId>(() => ({
         </template>
       </PlDropdown>
 
+      <PlAlert v-if="checkingSize" type="info" style="margin-top: 0.5rem">
+        Checking dataset size before you run. This can take a moment, please wait.
+      </PlAlert>
+
       <PlAlert
         v-if="selectedChain === 'alpha'"
         v-model="alphaWarningOpen"
@@ -224,6 +248,19 @@ const clusterAxis = computed<AxisId>(() => ({
         its motif reference is β-derived (so α motif grouping isn't calibrated), and α carries a
         weaker antigen-specificity signal. Prefer β where possible and interpret α clusters with
         caution.
+      </PlAlert>
+
+      <PlAlert
+        v-if="largeCdr3OnlyInput"
+        v-model="largeInputWarningOpen"
+        type="warn"
+        :closeable="true"
+      >
+        <b>Large input.</b> This dataset has
+        {{ app.model.outputs.inputSeqCount?.toLocaleString() }} sequences. GLIPH2's CDR3-only
+        clustering at this scale can take from hours to days (and may run out of memory). Choose a
+        <b>+ V gene</b> option above — it runs a faster per-V-gene path that stays tractable at this
+        size.
       </PlAlert>
 
       <PlSectionSeparator>Centroid</PlSectionSeparator>

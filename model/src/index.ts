@@ -19,6 +19,14 @@ import {
 export type * from "@milaboratories/helpers";
 
 /**
+ * Unique-count above which GLIPH2's global step (~O(n^2.8)) becomes intractable. Above this, the
+ * "+ V gene" option engages the per-V-partition fast path in the runner (run_gliph2.R, same
+ * threshold); CDR3-only mode has no fast path, so the UI warns when a CDR3-only input exceeds this.
+ * Keep in sync with FAST_THRESHOLD in gliph-runner/context/run_gliph2.R.
+ */
+export const VGENE_FASTPATH_THRESHOLD = 600_000;
+
+/**
  * The "Cluster by" selection, snapshotted from the chosen dropdown option (the
  * model.md snapshot pattern: `.args` is data-only, but the option refs come from
  * the result pool, so the UI writes the resolved selection into `data` on the
@@ -51,6 +59,10 @@ export type BlockData = {
   // Resources (advanced). CPU-only in v1 — no GPU.
   mem?: number;
   cpu?: number;
+
+  // Mirrored from the prerun output `inputSeqCount`. Blocks Run while this is undefined so the run can't start before the staging
+  // size check completes. Cleared on input change (stale guard). Never projected to args.
+  lastInputSeqCount?: number;
 
   // UI-only view state — stays in data, never projected to args.
   tableState: PlDataTableStateV2;
@@ -119,6 +131,11 @@ export const platforma = BlockModelV3.create(dataModel)
     // cleared/blank field (undefined) or NaN — a plain `< || >` would let those through as false.
     if (!(data.resolution >= 0.1 && data.resolution <= 100))
       throw new Error("Leiden resolution must be between 0.1 and 100");
+    // Block Run until the staging pre-flight size check lands (mirrored from the prerun into
+    // `data.lastInputSeqCount` by app.ts). Prevents launching the (potentially very long) run before
+    // the input size — and thus the CDR3-only fast-path warning — is known. Last gate, so param
+    // errors above surface first and this only shows once everything else is valid.
+    if (data.lastInputSeqCount === undefined) throw new Error("Checking dataset size…");
     // consensusThreshold is still clamped (canonicalize so the staleness gate doesn't fire on
     // out-of-range edits the centroid step would clamp anyway).
     const consensusThreshold = Math.min(1, Math.max(0, data.consensusThreshold));
@@ -134,6 +151,30 @@ export const platforma = BlockModelV3.create(dataModel)
       mem: data.mem,
       cpu: data.cpu,
     };
+  })
+
+  // Prerun (staging) args — count the input sequences before Run so the UI can warn about CDR3-only
+  // clustering at scale. Only needs the dataset + chosen sequence column; returning `undefined`
+  // defers the prerun until both are picked so it doesn't fire on every keystroke.
+  .prerunArgs((data) => {
+    if (data.datasetRef === undefined) return undefined;
+    const sel = data.inputSelection;
+    if (sel?.sequenceRef === undefined) return undefined;
+    return { datasetRef: data.datasetRef, sequenceRef: sel.sequenceRef };
+  })
+
+  // Input sequence count from the prerun. prerun.tpl.tengo saves a single-value TSV
+  // (`count\n<n>\n`) via `df.saveContent`; parse the integer. Not-ready-safe (allowPermanentAbsence).
+  // The UI gates a "clustering without + V gene is slow at this scale" warning on it.
+  .output("inputSeqCount", (ctx): number | undefined => {
+    const raw = ctx.prerun
+      ?.resolve({ field: "seqCount", assertFieldType: "Input", allowPermanentAbsence: true })
+      ?.getDataAsString();
+    if (raw === undefined) return undefined;
+    const lines = raw.trim().split("\n");
+    if (lines.length < 2) return undefined;
+    const n = Number(lines[1].trim());
+    return Number.isFinite(n) ? n : undefined;
   })
 
   // Dataset picker: TCR α/β clonotype datasets (bulk + single-cell). No peptide (variantKey).

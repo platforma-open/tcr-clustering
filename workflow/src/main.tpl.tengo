@@ -15,6 +15,10 @@ emptyCheckTpl := assets.importTemplate(":empty-check")
 deanonimizationTpl := assets.importTemplate(":deanonimization")
 anonymizationTpl := assets.importTemplate(":anonymization")
 
+// Staging pre-flight: count the input sequences so the UI can warn (before Run) that CDR3-only
+// clustering above ~600k is intractable and "+ V gene" (fast path) should be used. See prerun.tpl.tengo.
+wf.setPreRun(assets.importTemplate(":prerun"))
+
 // `description` (optional, trailing) sets "pl7.app/description", which the data table
 // renders as the column-header hover tooltip — a short definition of the column.
 setTableProps := func(spec, label, visibility, orderPriority, ...description) {

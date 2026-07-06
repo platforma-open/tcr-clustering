@@ -69,8 +69,10 @@ RUN R --no-echo -e "tryCatch(renv::restore(), error = function(e) message('paral
     && find /usr/local/lib/R -name keys.html -delete \
     && find "${R_LIBS_USER}" -name keys.html -delete
 
-# Bake the runner script. Clear the base image's entrypoint; the workflow supplies the full command
-# (`Rscript /app/run_gliph2.R <input.csv> <out_dir> <n_cores>`).
+# Bake the runner script + the patched gliph2 it loads (turboGliph 0.99.2 gliph2() with the
+# empty-reference crash fix; see run_gliph2.R for why). Clear the base image's entrypoint; the
+# workflow supplies the full command (`Rscript /app/run_gliph2.R <input.csv> <out_dir> <n_cores>`).
+COPY gliph2_patched.R /app/gliph2_patched.R
 COPY run_gliph2.R /app/run_gliph2.R
 ENTRYPOINT []
 CMD ["Rscript", "/app/run_gliph2.R"]
