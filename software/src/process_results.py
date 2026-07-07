@@ -546,12 +546,11 @@ centroid_cluster_to_seq_cols = [f"centroid_{c}" for c in sequence_cols]
 if sequence_cols:
     # Reference centroid = the medoid member's own per-chain sequences (a real member),
     # mirroring the centroid_* set: reference_centroid_<sequence_N>.
-    ref_source_cols = sequence_cols
     ref_lookup = (
         cloneTable
         .select(
             [pl.col("clonotypeKey").alias("medoid_key")]
-            + [pl.col(c).fill_null("").alias(f"reference_centroid_{c}") for c in ref_source_cols]
+            + [pl.col(c).fill_null("").alias(f"reference_centroid_{c}") for c in sequence_cols]
         )
         .unique("medoid_key", keep="first")
     )
@@ -574,15 +573,6 @@ if sequence_cols:
 centroid_sequences_for_cts = cloneTable.select(
     [pl.col('clonotypeKey').alias("centroid_key_cts")] + sequence_cols
 ).unique("centroid_key_cts", keep="first")
-
-# Join clusters with centroid_sequences_for_cts
-# 'clusters' has: clusterId (centroid key), clonotypeKey (member key), size, clusterLabel (centroid's CL-label)
-temp_cluster_to_seq_data = clusters.join(
-    centroid_sequences_for_cts,
-    left_on="clusterId",
-    right_on="centroid_key_cts",
-    how="left" # Keep all clusters
-)
 
 required_cols_cts = ['clusterId', 'clusterLabel', 'size'] + sequence_cols
 # Select necessary columns. The sequence_cols will be from the centroid.
@@ -647,7 +637,12 @@ cluster_abundances = cluster_abundances.with_columns(
     pl.sum('abundance').over('sampleId').alias('total_sample_abundance')
 )
 cluster_abundances = cluster_abundances.with_columns(
-    (pl.col('abundance') / pl.col('total_sample_abundance')).alias('abundance_normalized')
+    # Guard the division: a sample whose abundances all sum to 0 would otherwise yield NaN/inf.
+    # Mirrors the per-cluster fraction guard below.
+    pl.when(pl.col('total_sample_abundance') > 0)
+      .then(pl.col('abundance') / pl.col('total_sample_abundance'))
+      .otherwise(pl.lit(0.0, dtype=pl.Float64))
+      .alias('abundance_normalized')
 )
 cluster_abundances = cluster_abundances.drop('total_sample_abundance')
 

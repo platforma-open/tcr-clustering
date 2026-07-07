@@ -38,7 +38,7 @@ def main():
 
     # Dedup identical clustering-key tuples; the first clonotypeKey per tuple is the representative.
     # The mapping restores all clonotypes downstream.
-    reps = df.unique(subset=key_cols, keep="first")
+    reps = df.unique(subset=key_cols, keep="first", maintain_order=True)
     (
         df.join(
             reps.select(["clonotypeKey", *key_cols]).rename({"clonotypeKey": "representativeKey"}),

@@ -19,13 +19,33 @@ self.validateInputs({
 	resolution: "number",
 	"consensusThreshold,?": "number",
 	"weightByAbundance,?": "boolean",
+	fastThreshold: "number",
 	"mem,?": "number",
 	"cpu,?": "number"
 })
 
-self.defineOutputs("abundances", "clusterToSeq", "cloneToCluster", "abundancesPerCluster", "distanceToCentroid",
-	"clusterRadius", "clusterToSeqTop", "clusterRadiusTop", "abundancesTop", "sequences",
-	"gliphLog", "leidenLog", "isEmpty")
+// The block's file outputs, declared once as (workflow output key -> saved filename) and reused by
+// defineOutputs.
+outputFiles := [
+	{ output: "abundances", file: "abundances.tsv" },
+	{ output: "clusterToSeq", file: "cluster-to-seq.tsv" },
+	{ output: "cloneToCluster", file: "clone-to-cluster.tsv" },
+	{ output: "abundancesPerCluster", file: "abundances-per-cluster.tsv" },
+	{ output: "distanceToCentroid", file: "distance_to_centroid.tsv" },
+	{ output: "clusterRadius", file: "cluster-radius.tsv" },
+	{ output: "clusterToSeqTop", file: "cluster-to-seq-top.tsv" },
+	{ output: "clusterRadiusTop", file: "cluster-radius-top.tsv" },
+	{ output: "abundancesTop", file: "abundances-top.tsv" },
+	{ output: "sequences", file: "sequences.tsv" }
+]
+
+// defineOutputs = the file outputs above + the non-file outputs (both logs + the empty flag).
+outputNames := []
+for f in outputFiles {
+	outputNames = append(outputNames, f.output)
+}
+outputNames = append(outputNames, "gliphLog", "leidenLog", "isEmpty")
+self.defineOutputs(outputNames...)
 
 self.body(func(inputs) {
 	seqTable := inputs.seqTable
@@ -34,6 +54,7 @@ self.body(func(inputs) {
 	resolution := inputs.resolution
 	consensusThreshold := is_undefined(inputs.consensusThreshold) ? 0.6 : inputs.consensusThreshold
 	weightByAbundance := is_undefined(inputs.weightByAbundance) ? false : inputs.weightByAbundance
+	fastThreshold := inputs.fastThreshold
 
 	baseMemGiB := 32
 	if !is_undefined(inputs.mem) {
@@ -51,34 +72,19 @@ self.body(func(inputs) {
 			mem("1GiB").
 			cpu(1).
 			arg("--num-sequences").arg(string(numSequences))
-		emptyFiles := emptyFilesBuilder.
-			saveFile("abundances.tsv").
-			saveFile("cluster-to-seq.tsv").
-			saveFile("clone-to-cluster.tsv").
-			saveFile("abundances-per-cluster.tsv").
-			saveFile("distance_to_centroid.tsv").
-			saveFile("cluster-radius.tsv").
-			saveFile("cluster-to-seq-top.tsv").
-			saveFile("cluster-radius-top.tsv").
-			saveFile("abundances-top.tsv").
-			saveFile("sequences.tsv").
-			run()
-
-		return {
-			abundances: emptyFiles.getFile("abundances.tsv"),
-			clusterToSeq: emptyFiles.getFile("cluster-to-seq.tsv"),
-			cloneToCluster: emptyFiles.getFile("clone-to-cluster.tsv"),
-			abundancesPerCluster: emptyFiles.getFile("abundances-per-cluster.tsv"),
-			distanceToCentroid: emptyFiles.getFile("distance_to_centroid.tsv"),
-			clusterRadius: emptyFiles.getFile("cluster-radius.tsv"),
-			clusterToSeqTop: emptyFiles.getFile("cluster-to-seq-top.tsv"),
-			clusterRadiusTop: emptyFiles.getFile("cluster-radius-top.tsv"),
-			abundancesTop: emptyFiles.getFile("abundances-top.tsv"),
-			sequences: emptyFiles.getFile("sequences.tsv"),
-			gliphLog: {},
-			leidenLog: {},
-			isEmpty: true
+		for f in outputFiles {
+			emptyFilesBuilder = emptyFilesBuilder.saveFile(f.file)
 		}
+		emptyFiles := emptyFilesBuilder.run()
+
+		emptyOut := {}
+		for f in outputFiles {
+			emptyOut[f.output] = emptyFiles.getFile(f.file)
+		}
+		emptyOut.gliphLog = {}
+		emptyOut.leidenLog = {}
+		emptyOut.isEmpty = true
+		return emptyOut
 	} else {
 		// Engine = GLIPH2 (turboGliph) + Leiden, split into three cache-optimized steps so that the
 		// Leiden `resolution` knob feeds ONLY the cheap final partition — the expensive GLIPH2 network
@@ -121,6 +127,7 @@ self.body(func(inputs) {
 			arg("gliph_input.csv").
 			arg("gliph_out").
 			arg(string(cpu)).
+			arg(string(fastThreshold)).
 			saveFile("clone_edges.txt").
 			saveStdoutStream().
 			// Retain the expensive, resolution-independent network build (its inputs carry no
@@ -137,7 +144,7 @@ self.body(func(inputs) {
 		leiden := exec.builder().
 			software(leidenSw).
 			mem(string(int(math.max(16, baseMemGiB / 4))) + "GiB").
-			cpu(2).
+			cpu(1).
 			printErrStreamToStdout().
 			addFile("clone_edges.txt", gliph.getFile("clone_edges.txt")).
 			addFile("uniq.csv", prep.getFile("uniq.csv")).
@@ -168,33 +175,18 @@ self.body(func(inputs) {
 			resultBuilder = resultBuilder.arg("--no-abundance-weighting")
 		}
 
-		result := resultBuilder.
-			saveFile("abundances.tsv").
-			saveFile("cluster-to-seq.tsv").
-			saveFile("clone-to-cluster.tsv").
-			saveFile("abundances-per-cluster.tsv").
-			saveFile("distance_to_centroid.tsv").
-			saveFile("cluster-radius.tsv").
-			saveFile("cluster-to-seq-top.tsv").
-			saveFile("cluster-radius-top.tsv").
-			saveFile("abundances-top.tsv").
-			saveFile("sequences.tsv").
-			run()
-
-		return {
-			abundances: result.getFile("abundances.tsv"),
-			clusterToSeq: result.getFile("cluster-to-seq.tsv"),
-			cloneToCluster: result.getFile("clone-to-cluster.tsv"),
-			abundancesPerCluster: result.getFile("abundances-per-cluster.tsv"),
-			distanceToCentroid: result.getFile("distance_to_centroid.tsv"),
-			clusterRadius: result.getFile("cluster-radius.tsv"),
-			clusterToSeqTop: result.getFile("cluster-to-seq-top.tsv"),
-			clusterRadiusTop: result.getFile("cluster-radius-top.tsv"),
-			abundancesTop: result.getFile("abundances-top.tsv"),
-			sequences: result.getFile("sequences.tsv"),
-			gliphLog: gliphLog,
-			leidenLog: leidenLog,
-			isEmpty: false
+		for f in outputFiles {
+			resultBuilder = resultBuilder.saveFile(f.file)
 		}
+		result := resultBuilder.run()
+
+		resultOut := {}
+		for f in outputFiles {
+			resultOut[f.output] = result.getFile(f.file)
+		}
+		resultOut.gliphLog = gliphLog
+		resultOut.leidenLog = leidenLog
+		resultOut.isEmpty = false
+		return resultOut
 	}
 })

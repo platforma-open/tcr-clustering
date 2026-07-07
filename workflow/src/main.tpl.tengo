@@ -159,7 +159,8 @@ wf.body(func(args) {
 		numSequences: numSequences,
 		resolution: args.resolution,
 		consensusThreshold: args.consensusThreshold,
-		weightByAbundance: args.weightByAbundance
+		weightByAbundance: args.weightByAbundance,
+		fastThreshold: args.fastThreshold
 		}, {
 			metaInputs: {
 				mem: args.mem,

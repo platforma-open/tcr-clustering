@@ -57,8 +57,7 @@ a <- commandArgs(trailingOnly = TRUE)
 IN <- a[1]
 OUTDIR <- a[2]
 NCORES <- if (length(a) >= 3) as.integer(a[3]) else 1L
-# Unique-count above which the +V-gene fast path kicks in. Optional 4th arg so it is tunable from
-# the workflow without rebuilding the image; default 600000.
+# Unique-count above which the +V-gene fast path kicks in.
 FAST_THRESHOLD <- if (length(a) >= 4) as.numeric(a[4]) else 600000
 # TRBV genes with fewer unique seqs than this are merged into one combined partition (still correct:
 # global_vgene = TRUE keeps cross-gene pairs out of it), to avoid a long tail of tiny gliph2 runs.

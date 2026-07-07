@@ -20,9 +20,12 @@ export type * from "@milaboratories/helpers";
 
 /**
  * Unique-count above which GLIPH2's global step (~O(n^2.8)) becomes intractable. Above this, the
- * "+ V gene" option engages the per-V-partition fast path in the runner (run_gliph2.R, same
- * threshold); CDR3-only mode has no fast path, so the UI warns when a CDR3-only input exceeds this.
- * Keep in sync with FAST_THRESHOLD in gliph-runner/context/run_gliph2.R.
+ * "+ V gene" option engages the per-V-partition fast path in the runner (run_gliph2.R); CDR3-only
+ * mode has no fast path, so the UI warns when a CDR3-only input exceeds this.
+ *
+ * Single source of truth: this constant both drives the UI warning AND is passed through the
+ * workflow to run_gliph2.R as its fast-path threshold (the exec's 4th arg), so the two cannot drift.
+ * run_gliph2.R keeps a matching literal only as a standalone/manual-run fallback.
  */
 export const VGENE_FASTPATH_THRESHOLD = 600_000;
 
@@ -126,19 +129,18 @@ export const platforma = BlockModelV3.create(dataModel)
     if (!sel) throw new Error("Choose what to cluster by");
     if (!sel.sequenceRef) throw new Error("A CDR3 column is required");
 
-    // Gate Run on the Leiden resolution: throwing here makes the block not-runnable (Run disabled,
-    // message surfaced) rather than silently clamping. The `!(… >= … && … <= …)` form also catches a
+    // Gate Run on the numeric params: throwing makes the block not-runnable (Run disabled, message
+    // surfaced) rather than silently coercing. The `!(… >= … && … <= …)` form also catches a
     // cleared/blank field (undefined) or NaN — a plain `< || >` would let those through as false.
     if (!(data.resolution >= 0.1 && data.resolution <= 100))
       throw new Error("Leiden resolution must be between 0.1 and 100");
+    if (!(data.consensusThreshold >= 0 && data.consensusThreshold <= 1))
+      throw new Error("Consensus threshold must be between 0 and 1");
     // Block Run until the staging pre-flight size check lands (mirrored from the prerun into
     // `data.lastInputSeqCount` by app.ts). Prevents launching the (potentially very long) run before
     // the input size — and thus the CDR3-only fast-path warning — is known. Last gate, so param
     // errors above surface first and this only shows once everything else is valid.
     if (data.lastInputSeqCount === undefined) throw new Error("Checking dataset size…");
-    // consensusThreshold is still clamped (canonicalize so the staleness gate doesn't fire on
-    // out-of-range edits the centroid step would clamp anyway).
-    const consensusThreshold = Math.min(1, Math.max(0, data.consensusThreshold));
 
     return {
       defaultBlockLabel: data.defaultBlockLabel,
@@ -146,10 +148,11 @@ export const platforma = BlockModelV3.create(dataModel)
       datasetRef: data.datasetRef,
       inputSelection: sel,
       resolution: data.resolution,
-      consensusThreshold,
+      consensusThreshold: data.consensusThreshold,
       weightByAbundance: data.weightByAbundance,
       mem: data.mem,
       cpu: data.cpu,
+      fastThreshold: VGENE_FASTPATH_THRESHOLD,
     };
   })
 
@@ -163,8 +166,8 @@ export const platforma = BlockModelV3.create(dataModel)
     return { datasetRef: data.datasetRef, sequenceRef: sel.sequenceRef };
   })
 
-  // Input sequence count from the prerun. prerun.tpl.tengo saves a single-value TSV
-  // (`count\n<n>\n`) via `df.saveContent`; parse the integer. Not-ready-safe (allowPermanentAbsence).
+  // Unique input sequence count from the prerun (distinct CDR3 values). prerun.tpl.tengo saves a single-value
+  // TSV (`count\n<n>\n`) via `df.saveContent`; parse the integer. Not-ready-safe (allowPermanentAbsence).
   // The UI gates a "clustering without + V gene is slow at this scale" warning on it.
   .output("inputSeqCount", (ctx): number | undefined => {
     const raw = ctx.prerun

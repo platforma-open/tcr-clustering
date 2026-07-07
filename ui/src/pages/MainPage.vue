@@ -257,7 +257,7 @@ const clusterAxis = computed<AxisId>(() => ({
         :closeable="true"
       >
         <b>Large input.</b> This dataset has
-        {{ app.model.outputs.inputSeqCount?.toLocaleString() }} sequences. GLIPH2's CDR3-only
+        {{ app.model.outputs.inputSeqCount?.toLocaleString() }} unique sequences. GLIPH2's CDR3-only
         clustering at this scale can take from hours to days (and may run out of memory). Choose a
         <b>+ V gene</b> option above — it runs a faster per-V-gene path that stays tractable at this
         size.
@@ -327,7 +327,10 @@ const clusterAxis = computed<AxisId>(() => ({
           :step="1"
           :maxValue="128"
         >
-          <template #tooltip>CPU cores to allocate for the clustering step.</template>
+          <template #tooltip>
+            CPU cores for the GLIPH2 network-build step — the compute-heavy stage. Other steps run
+            at fixed CPU allocations.
+          </template>
         </PlNumberField>
       </PlAccordionSection>
     </PlSlideModal>
