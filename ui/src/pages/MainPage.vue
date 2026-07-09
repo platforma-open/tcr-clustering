@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { PlMultiSequenceAlignment } from "@milaboratories/multi-sequence-alignment";
 import strings from "@milaboratories/strings";
-import { VGENE_FASTPATH_THRESHOLD } from "@platforma-open/milaboratories.tcr-clustering.model";
+import {
+  VGENE_FASTPATH_THRESHOLD,
+  VGENE_PARTITION_WARN_THRESHOLD,
+} from "@platforma-open/milaboratories.tcr-clustering.model";
 import type {
   AxisId,
   PColumnPredicate,
@@ -43,6 +46,8 @@ const clusteringLogTabOptions = [
 const alphaWarningOpen = ref(true);
 // Large-input warning visibility — same controlled-close pattern as the α-warning.
 const largeInputWarningOpen = ref(true);
+// Large-V-gene-partition warning visibility — same controlled-close pattern.
+const vGeneWarningOpen = ref(true);
 const settingsOpen = ref(
   app.model.data.datasetRef === undefined || app.model.data.inputSelection === undefined,
 );
@@ -112,6 +117,15 @@ const largeCdr3OnlyInput = computed(() => {
   const sel = app.model.data.inputSelection;
   if (!sel || sel.vGeneRef !== undefined) return false;
   return (app.model.outputs.inputSeqCount ?? 0) > VGENE_FASTPATH_THRESHOLD;
+});
+
+// Warn when a single V-gene partition is so large that even the per-V-gene fast path is intractable —
+// GLIPH2 clusters each V gene on its own (per-partition global step ~O(n^1.8-2.8) in that group's
+// unique CDR3 count). The prerun sizes the largest V-gene partition for ANY selection (the V-gene
+// column is resolved from the CDR3 chain), so this fires in both CDR3-only and "+ V gene" mode.
+const largeVGenePartition = computed(() => {
+  if (app.model.data.inputSelection === undefined) return false;
+  return (app.model.outputs.maxVGeneSeqCount ?? 0) > VGENE_PARTITION_WARN_THRESHOLD;
 });
 
 // Staging size check in flight: inputs are picked but the prerun count hasn't landed yet. Run is
@@ -234,7 +248,7 @@ const clusterAxis = computed<AxisId>(() => ({
       </PlDropdown>
 
       <PlAlert v-if="checkingSize" type="info" style="margin-top: 0.5rem">
-        Checking dataset size before you run. This can take a moment, please wait.
+        Checking dataset size before you run. This can take a moment, please wait...
       </PlAlert>
 
       <PlAlert
@@ -251,7 +265,7 @@ const clusterAxis = computed<AxisId>(() => ({
       </PlAlert>
 
       <PlAlert
-        v-if="largeCdr3OnlyInput"
+        v-if="largeCdr3OnlyInput && !largeVGenePartition"
         v-model="largeInputWarningOpen"
         type="warn"
         :closeable="true"
@@ -261,6 +275,13 @@ const clusterAxis = computed<AxisId>(() => ({
         clustering at this scale can take from hours to days (and may run out of memory). Choose a
         <b>+ V gene</b> option above — it runs a faster per-V-gene path that stays tractable at this
         size.
+      </PlAlert>
+
+      <PlAlert v-if="largeVGenePartition" v-model="vGeneWarningOpen" type="warn" :closeable="true">
+        <b>Very large V gene.</b> Do not cluster by CDR3 alone. A single V gene in this dataset has
+        {{ app.model.outputs.maxVGeneSeqCount?.toLocaleString() }} sequences. Even with the
+        per-V-gene fast path this one group can make the whole run take a very long time —
+        potentially days.
       </PlAlert>
 
       <PlSectionSeparator>Centroid</PlSectionSeparator>

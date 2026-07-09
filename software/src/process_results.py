@@ -456,15 +456,20 @@ def compute_centroid_and_distance(clusters_df: pl.DataFrame,
             dist_keys.append(k)
             dist_values.append(norm_by_key[k])
 
-        # Medoid (reference centroid): argmin D_i, tie-break (min D_i, -w_i, seq), but ONLY
-        # over COMPLETE members — a clone missing a chain (now unpenalized in the distance)
+        # Medoid (reference centroid): argmin D_i, tie-break (min D_i, -w_i, seq, clonotypeKey), but
+        # ONLY over COMPLETE members — a clone missing a chain (now unpenalized in the distance)
         # must not be chosen as the biological reference. Dropped-by-cap members carry
         # inflated D_i so they don't win the argmin. Fall back to all members only if no
         # member is complete (degenerate cluster where every member lacks some chain).
+        # The final clonotypeKey tie-break is REQUIRED for determinism: members sharing a CDR3
+        # (deduped for clustering, then re-expanded here) tie on (D_i, w_i, seq), so without it
+        # min() would pick by the non-deterministic group_by iteration order — a non-reproducible
+        # medoid = clusterId, which also flips every clusterId-keyed output and triggers backend
+        # CID conflicts.
         candidate_keys = [k for k in keys if complete_by_key[k]] or keys
         best_key = min(
             candidate_keys,
-            key=lambda k: (d_total_by_key[k], -weight_by_key[k], seq_by_key[k])
+            key=lambda k: (d_total_by_key[k], -weight_by_key[k], seq_by_key[k], k)
         )
         medoid_clusters.append(cluster_id)
         medoid_keys.append(best_key)

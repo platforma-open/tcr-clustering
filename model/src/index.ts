@@ -30,6 +30,12 @@ export type * from "@milaboratories/helpers";
 export const VGENE_FASTPATH_THRESHOLD = 600_000;
 
 /**
+ * Per-V-gene partition size (distinct CDR3 in a single V gene) above which even the "+ V gene" fast
+ * path is very slow.
+ */
+export const VGENE_PARTITION_WARN_THRESHOLD = 800_000;
+
+/**
  * The "Cluster by" selection, snapshotted from the chosen dropdown option (the
  * model.md snapshot pattern: `.args` is data-only, but the option refs come from
  * the result pool, so the UI writes the resolved selection into `data` on the
@@ -39,6 +45,8 @@ export const VGENE_FASTPATH_THRESHOLD = 600_000;
 export type InputSelection = {
   sequenceRef: SUniversalPColumnId;
   vGeneRef?: SUniversalPColumnId; // resolved V-gene column for the chosen chain (set only for "+ V gene")
+  // The chain's single V-gene column, resolved for EVERY selection.
+  resolvedVGeneRef?: SUniversalPColumnId;
 };
 
 export type BlockData = {
@@ -146,7 +154,8 @@ export const platforma = BlockModelV3.create(dataModel)
       defaultBlockLabel: data.defaultBlockLabel,
       customBlockLabel: data.customBlockLabel,
       datasetRef: data.datasetRef,
-      inputSelection: sel,
+      // Strip resolvedVGeneRef (prerun-only) — clustering keys on vGeneRef, set only for "+ V gene".
+      inputSelection: { sequenceRef: sel.sequenceRef, vGeneRef: sel.vGeneRef },
       resolution: data.resolution,
       consensusThreshold: data.consensusThreshold,
       weightByAbundance: data.weightByAbundance,
@@ -163,7 +172,11 @@ export const platforma = BlockModelV3.create(dataModel)
     if (data.datasetRef === undefined) return undefined;
     const sel = data.inputSelection;
     if (sel?.sequenceRef === undefined) return undefined;
-    return { datasetRef: data.datasetRef, sequenceRef: sel.sequenceRef };
+    return {
+      datasetRef: data.datasetRef,
+      sequenceRef: sel.sequenceRef,
+      vGeneRef: sel.resolvedVGeneRef,
+    };
   })
 
   // Unique input sequence count from the prerun (distinct CDR3 values). prerun.tpl.tengo saves a single-value
@@ -172,6 +185,18 @@ export const platforma = BlockModelV3.create(dataModel)
   .output("inputSeqCount", (ctx): number | undefined => {
     const raw = ctx.prerun
       ?.resolve({ field: "seqCount", assertFieldType: "Input", allowPermanentAbsence: true })
+      ?.getDataAsString();
+    if (raw === undefined) return undefined;
+    const lines = raw.trim().split("\n");
+    if (lines.length < 2) return undefined;
+    const n = Number(lines[1].trim());
+    return Number.isFinite(n) ? n : undefined;
+  })
+
+  // Distinct CDR3s in the LARGEST single V-gene partition
+  .output("maxVGeneSeqCount", (ctx): number | undefined => {
+    const raw = ctx.prerun
+      ?.resolve({ field: "maxVGeneCount", assertFieldType: "Input", allowPermanentAbsence: true })
       ?.getDataAsString();
     if (raw === undefined) return undefined;
     const lines = raw.trim().split("\n");
@@ -280,11 +305,18 @@ export const platforma = BlockModelV3.create(dataModel)
     const options: { label: string; value: string }[] = [];
     for (const c of cdr3Cols) {
       const base = trimPrimary(c.label ?? "");
-      const single: InputSelection = { sequenceRef: c.value };
-      options.push({ label: base, value: JSON.stringify(single) });
+      // The chain's single V-gene column, attached to BOTH options as resolvedVGeneRef so the prerun
+      // can size the largest V-gene partition at CDR3 selection (the ">800k" warning) regardless of
+      // the CDR3-only vs "+ V gene" choice. Only the "+ V gene" option also sets vGeneRef (clustering).
       const vGeneRef = vGeneByChain.get(chainOf(c.label ?? ""));
+      const single: InputSelection = { sequenceRef: c.value, resolvedVGeneRef: vGeneRef };
+      options.push({ label: base, value: JSON.stringify(single) });
       if (vGeneRef !== undefined) {
-        const withV: InputSelection = { sequenceRef: c.value, vGeneRef };
+        const withV: InputSelection = {
+          sequenceRef: c.value,
+          vGeneRef,
+          resolvedVGeneRef: vGeneRef,
+        };
         options.push({ label: `${base} + V gene`, value: JSON.stringify(withV) });
       }
     }
