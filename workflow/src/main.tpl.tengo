@@ -131,7 +131,20 @@ wf.body(func(args) {
 
 	// clone table
 	cloneTableBuilder := pframes.tsvFileBuilder()
-	cloneTableBuilder.add({ spec: abundanceColumn.spec, data: anonymizedAbundanceData }, {header: "abundance"})
+	// @TODO: Delete abundanceSaltedSpec after SDK update fixing CID, return to
+	// 	cloneTableBuilder.add({ spec: abundanceColumn.spec, data: anonymizedAbundanceData }, {header: "abundance"})
+	// TEMP CID-conflict workaround (remove when the SDK makes xsv.exportFrame output deterministic):
+	// the shared tsvFileBuilder export render is content-addressed but has non-deterministic row order
+	// (multi-sample clonotypes tie on clonotypeKey), so an IDENTICAL cloneTable from another block
+	// (e.g. clonotype-clustering on the same dataset) lands on the same render and writes divergent
+	// bytes -> CIDConflictError. Salting the intermediate abundance spec NAME changes the render CID
+	// (the distiller keeps `name`) WITHOUT changing the TSV bytes/headers or data — process_results and
+	// clustering results are unaffected; the render just stops being shared with other block types.
+	// Per-block-type, so two tcr-clustering instances on one dataset aren't covered — the SDK fix is it.
+	abundanceSaltedSpec := maps.deepMerge(abundanceColumn.spec, {
+		name: abundanceColumn.spec.name + "/cidWorkaround/tcr-clustering"
+	})
+	cloneTableBuilder.add({ spec: abundanceSaltedSpec, data: anonymizedAbundanceData }, {header: "abundance"})
 	cloneTableBuilder.add(columns.getColumn(sequenceRef), {header: "sequence_0"})
 	// Get the array of label columns using the correct method
 	clonotypeKeyLabelsArray := columns.getColumns("clonotypeKeyLabels")
