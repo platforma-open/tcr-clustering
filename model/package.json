@@ -1,0 +1,42 @@
+{
+  "name": "@platforma-open/milaboratories.tcr-clustering.model",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Block model",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "sources": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./dist/*": "./dist/*"
+  },
+  "scripts": {
+    "build": "ts-builder build --target block-model && block-tools build-model",
+    "watch": "ts-builder build --target block-model --watch",
+    "type-check": "ts-builder type-check --target block-model",
+    "do-pack": "shx rm -f *.tgz && pnpm pack && shx mv *.tgz package.tgz",
+    "fmt": "ts-builder format",
+    "check": "ts-builder check --target block-model"
+  },
+  "dependencies": {
+    "@milaboratories/graph-maker": "catalog:",
+    "@milaboratories/helpers": "catalog:",
+    "@milaboratories/strings": "catalog:",
+    "@platforma-sdk/model": "catalog:"
+  },
+  "devDependencies": {
+    "@milaboratories/ts-builder": "catalog:",
+    "@milaboratories/ts-configs": "catalog:",
+    "@platforma-sdk/block-tools": "catalog:",
+    "eslint": "catalog:"
+  },
+  "peerDependencies": {
+    "@types/node": "*",
+    "typescript": "*"
+  }
+}

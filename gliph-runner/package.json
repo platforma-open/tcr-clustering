@@ -1,0 +1,37 @@
+{
+  "name": "@platforma-open/milaboratories.tcr-clustering.gliph-runner",
+  "version": "0.0.0",
+  "description": "GLIPH2 runner: a docker image (R + turboGliph, baked run_gliph2.R) that builds the GLIPH2 clone_network for the GLIPH2 + Leiden clustering engine.",
+  "files": [
+    "./dist/**/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "block-tools software build",
+    "do-pack": "shx rm -f *.tgz && block-tools software build && pnpm pack && shx mv platforma-open*.tgz package.tgz",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
+  },
+  "devDependencies": {
+    "@platforma-open/milaboratories.runenv-python-3": "catalog:",
+    "@platforma-sdk/block-tools": "catalog:",
+    "shx": "catalog:"
+  },
+  "block-software": {
+    "entrypoints": {
+      "runner": {
+        "docker": {
+          "artifact": {
+            "type": "docker",
+            "context": "./context",
+            "dockerfile": "Dockerfile"
+          },
+          "cmd": [
+            "Rscript",
+            "/app/run_gliph2.R"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,64 @@
+// Pre-flight count for the tcr-clustering workflow (staging phase).
+//
+// Counts the DISTINCT CDR3 sequences in the selected column — the "number of input sequences" the
+// main run actually clusters. Surfaced to the model (via ctx.prerun) so the UI can WARN, before Run,
+// that clustering WITHOUT the "+ V gene" option above ~600k is intractable: GLIPH2's global step is
+// ~O(n^2.8) in the unique count, and the +V-gene fast path (per-V partition, global-only) does NOT
+// apply to CDR3-only mode. Runs automatically in staging, so the warning is reactive/pre-Run.
+//
+// It ALSO counts the distinct CDR3s in the largest single V-gene partition, so the
+// UI can warn that one oversized V gene makes even the per-V fast path take days (per-partition global
+// step is ~O(n^1.8-2.8) in that partition's unique count).
+//
+// Mirrors main.tpl.tengo's input plumbing (anchor + chosen sequence ref [+ V-gene ref in "+ V gene"
+// mode]) so the counts reflect what the run processes. Cheap: loads the sequence column (and the
+// V-gene column when present) and counts distinct values (mem 1GiB, cpu 1).
+
+wf := import("@platforma-sdk/workflow-tengo:workflow")
+pt := import("@platforma-sdk/workflow-tengo:pt")
+
+wf.prepare(func(args) {
+	bb := wf.createPBundleBuilder()
+	bb.ignoreMissingDomains() // query works for both bulk and single-cell data (as in main.tpl.tengo)
+	bb.addAnchor("main", args.datasetRef)
+	bb.addSingle(args.sequenceRef)
+	// "+ V gene" mode: also pull the V-gene column so the body can size the largest V-gene partition.
+	if !is_undefined(args.vGeneRef) {
+		bb.addSingle(args.vGeneRef)
+	}
+	return { columns: bb.build() }
+})
+
+wf.body(func(args) {
+	seq := args.columns.getColumn(args.sequenceRef)
+
+	// Count DISTINCT CDR3 values — this is the post-dedup unique count that gates the fast path
+	// (run_gliph2.R thresholds on nrow(cdr3) after prep.py dedups on the CDR3 [+ V gene] key).
+	countWf := pt.workflow().mem("1GiB").cpu(1)
+	seqEntry := pt.p.column("seq", { spec: seq.spec, data: seq.data })
+	df := countWf.frame(seqEntry)
+	df.select(pt.col("seq").nUnique().alias("count")).saveContent("count.tsv")
+	countRun := countWf.run()
+
+	outputs := {
+		seqCount: countRun.getFileContent("count.tsv")
+	}
+
+	// Count distinct CDR3 per V gene, and keep the max
+	if !is_undefined(args.vGeneRef) {
+		vgene := args.columns.getColumn(args.vGeneRef)
+		vWf := pt.workflow().mem("1GiB").cpu(1)
+		vSeqEntry := pt.p.column("seq", { spec: seq.spec, data: seq.data })
+		vGeneEntry := pt.p.column("vgene", { spec: vgene.spec, data: vgene.data })
+		vdf := vWf.frame(pt.p.inner(vSeqEntry, vGeneEntry))
+		grouped := vdf.groupBy("vgene").agg(pt.col("seq").nUnique().alias("cnt"))
+		grouped.select(pt.col("cnt").max().alias("maxCount")).saveContent("maxvgene.tsv")
+		vRun := vWf.run()
+		outputs.maxVGeneCount = vRun.getFileContent("maxvgene.tsv")
+	}
+
+	return {
+		outputs: outputs,
+		exports: {}
+	}
+})

@@ -1,0 +1,192 @@
+self := import("@platforma-sdk/workflow-tengo:tpl")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+
+math := import("math")
+times := import("times")
+gliphRunnerSw := assets.importSoftware("@platforma-open/milaboratories.tcr-clustering.gliph-runner:runner")
+prepSw := assets.importSoftware("@platforma-open/milaboratories.tcr-clustering.software:prep")
+leidenSw := assets.importSoftware("@platforma-open/milaboratories.tcr-clustering.software:leiden")
+processResultsSw := assets.importSoftware("@platforma-open/milaboratories.tcr-clustering.software:process-results")
+createEmptyFilesSw := assets.importSoftware("@platforma-open/milaboratories.tcr-clustering.software:create-empty-files")
+
+self.validateInputs({
+	"__options__,closed": "",
+	emptyOrNot: "any",
+	seqTable: "any",
+	cloneTable: "any",
+	numSequences: "number",
+	resolution: "number",
+	"consensusThreshold,?": "number",
+	"weightByAbundance,?": "boolean",
+	fastThreshold: "number",
+	"mem,?": "number",
+	"cpu,?": "number"
+})
+
+// The block's file outputs, declared once as (workflow output key -> saved filename) and reused by
+// defineOutputs.
+outputFiles := [
+	{ output: "abundances", file: "abundances.tsv" },
+	{ output: "clusterToSeq", file: "cluster-to-seq.tsv" },
+	{ output: "cloneToCluster", file: "clone-to-cluster.tsv" },
+	{ output: "abundancesPerCluster", file: "abundances-per-cluster.tsv" },
+	{ output: "distanceToCentroid", file: "distance_to_centroid.tsv" },
+	{ output: "clusterRadius", file: "cluster-radius.tsv" },
+	{ output: "clusterToSeqTop", file: "cluster-to-seq-top.tsv" },
+	{ output: "clusterRadiusTop", file: "cluster-radius-top.tsv" },
+	{ output: "abundancesTop", file: "abundances-top.tsv" },
+	{ output: "sequences", file: "sequences.tsv" }
+]
+
+// defineOutputs = the file outputs above + the non-file outputs (both logs + the empty flag).
+outputNames := []
+for f in outputFiles {
+	outputNames = append(outputNames, f.output)
+}
+outputNames = append(outputNames, "gliphLog", "leidenLog", "isEmpty")
+self.defineOutputs(outputNames...)
+
+self.body(func(inputs) {
+	seqTable := inputs.seqTable
+	cloneTable := inputs.cloneTable
+	numSequences := inputs.numSequences
+	resolution := inputs.resolution
+	consensusThreshold := is_undefined(inputs.consensusThreshold) ? 0.6 : inputs.consensusThreshold
+	weightByAbundance := is_undefined(inputs.weightByAbundance) ? false : inputs.weightByAbundance
+	fastThreshold := inputs.fastThreshold
+
+	baseMemGiB := 32
+	if !is_undefined(inputs.mem) {
+		baseMemGiB = inputs.mem
+	}
+	cpu := 16
+	if !is_undefined(inputs.cpu) {
+		cpu = inputs.cpu
+	}
+
+	if string(inputs.emptyOrNot.getData()) == "empty" {
+		// Empty input: header-only files with the same schema the real run produces.
+		emptyFilesBuilder := exec.builder().
+			software(createEmptyFilesSw).
+			mem("1GiB").
+			cpu(1).
+			arg("--num-sequences").arg(string(numSequences))
+		for f in outputFiles {
+			emptyFilesBuilder = emptyFilesBuilder.saveFile(f.file)
+		}
+		emptyFiles := emptyFilesBuilder.run()
+
+		emptyOut := {}
+		for f in outputFiles {
+			emptyOut[f.output] = emptyFiles.getFile(f.file)
+		}
+		emptyOut.gliphLog = {}
+		emptyOut.leidenLog = {}
+		emptyOut.isEmpty = true
+		return emptyOut
+	} else {
+		// Engine = GLIPH2 (turboGliph) + Leiden, split into three cache-optimized steps so that the
+		// Leiden `resolution` knob feeds ONLY the cheap final partition — the expensive GLIPH2 network
+		// stays cached across resolution tweaks (its inputs carry no resolution).
+		//
+		// Step 1 — prep (base-python): dedup the per-clonotype table to unique clustering keys and emit
+		// the GLIPH2 input (CDR3b [+ TRBV]), the dedup mapping (representativeKey -> clonotypeKey,
+		// consumed by process-results) and the seq_id<->CDR3 map (uniq.csv, consumed by Leiden).
+		prep := exec.builder().
+			software(prepSw).
+			mem(string(int(math.max(16, baseMemGiB / 4))) + "GiB").
+			cpu(2).
+			printErrStreamToStdout().
+			addFile("input.tsv", seqTable).
+			arg("input.tsv").
+			arg("gliph_input.csv").
+			arg("dedup_mapping.tsv").
+			arg("uniq.csv").
+			saveFile("gliph_input.csv").
+			saveFile("dedup_mapping.tsv").
+			saveFile("uniq.csv").
+			// Resolution-independent: retain its outputs so a resolution tweak recovers them instead
+			// of recomputing (part of keeping the GLIPH network build cached across resolution changes).
+			cache(6 * times.hour).
+			run()
+
+		// Step 2 — GLIPH2 (turboGliph, docker). Builds the CDR3 similarity network from the unique
+		// sequences and writes its unique endpoint pairs to clone_edges.txt (the runner compacts
+		// gliph2()'s in-memory connections; the Leiden step needs only the two CDR3b endpoints).
+		// EXPENSIVE (memory-heavy: GLIPH2's network build is the block's peak-RAM step). Inputs =
+		// gliph_input.csv + n_cores only.
+		gliph := exec.builder().
+			software(gliphRunnerSw).
+			// TODO(mem): flat default; GLIPH2 peak RAM grows with the unique-sequence count and large
+			// datasets may OOM at 32 GiB. Follow-up: size mem from the post-dedup count. See the delta doc.
+			mem(string(baseMemGiB) + "GiB").
+			cpu(cpu).
+			printErrStreamToStdout().
+			addFile("gliph_input.csv", prep.getFile("gliph_input.csv")).
+			arg("gliph_input.csv").
+			arg("gliph_out").
+			arg(string(cpu)).
+			arg(string(fastThreshold)).
+			saveFile("clone_edges.txt").
+			saveStdoutStream().
+			// Retain the expensive, resolution-independent network build (its inputs carry no
+			// resolution), so tweaking the Leiden resolution recovers this result instead of rerunning
+			// GLIPH2. This is the cache that makes resolution the cheap-to-iterate knob.
+			cache(6 * times.hour).
+			run()
+
+		gliphLog := gliph.getStdoutStream()
+
+		// Step 3 — Leiden partition (base-python + leidenalg/igraph). Turns the clone_network into one
+		// integer cluster per unique sequence, at the chosen resolution (seed=0 -> deterministic given
+		// the network). CHEAP and resolution-dependent — the only step that re-runs on a resolution change.
+		leiden := exec.builder().
+			software(leidenSw).
+			mem(string(int(math.max(16, baseMemGiB / 4))) + "GiB").
+			cpu(1).
+			printErrStreamToStdout().
+			addFile("clone_edges.txt", gliph.getFile("clone_edges.txt")).
+			addFile("uniq.csv", prep.getFile("uniq.csv")).
+			arg("clone_edges.txt").
+			arg("uniq.csv").
+			arg("output.csv").
+			arg("--resolution").arg(string(resolution)).
+			saveFile("output.csv").
+			saveStdoutStream().
+			run()
+
+		clusters := leiden.getFile("output.csv")
+		leidenLog := leiden.getStdoutStream()
+
+		// Step 4 — expand to clonotypes, kalign centroid/medoid/distance, medoid-relabel -> TSVs.
+		// Engine-agnostic: it consumes the membership (output.csv: seq_id,cluster) + the dedup mapping,
+		// unchanged from the previous clustering engine (the kalign centroid/medoid pipeline).
+		resultBuilder := exec.builder().
+			software(processResultsSw).
+			mem(string(int(math.max(32, baseMemGiB / 2))) + "GiB").
+			cpu(8).
+			addFile("clusters.csv", clusters).
+			addFile("cloneTable.tsv", cloneTable).
+			addFile("dedup_mapping.tsv", prep.getFile("dedup_mapping.tsv")).
+			arg("--consensus-threshold").arg(string(consensusThreshold))
+
+		if !weightByAbundance {
+			resultBuilder = resultBuilder.arg("--no-abundance-weighting")
+		}
+
+		for f in outputFiles {
+			resultBuilder = resultBuilder.saveFile(f.file)
+		}
+		result := resultBuilder.run()
+
+		resultOut := {}
+		for f in outputFiles {
+			resultOut[f.output] = result.getFile(f.file)
+		}
+		resultOut.gliphLog = gliphLog
+		resultOut.leidenLog = leidenLog
+		resultOut.isEmpty = false
+		return resultOut
+	}
+})

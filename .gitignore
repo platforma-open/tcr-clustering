@@ -13,3 +13,6 @@ vite.config.*.timestamp-*
 /.idea
 software/**/*.tgz
 .vscode/sftp.json
+# Python
+__pycache__/
+*.pyc
