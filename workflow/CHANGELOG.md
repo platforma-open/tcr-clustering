@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2
+
+### Patch Changes
+
+- 05839c8: Release software
+- Updated dependencies [05839c8]
+  - @platforma-open/milaboratories.tcr-clustering.gliph-runner@1.0.1
+  - @platforma-open/milaboratories.tcr-clustering.software@1.0.1
+
 ## 1.0.1
 
 ### Patch Changes

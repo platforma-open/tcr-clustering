@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+### Patch Changes
+
+- 05839c8: Release software
+
 ## 1.0.1
 
 ### Patch Changes
